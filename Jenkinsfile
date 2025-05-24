@@ -1,27 +1,42 @@
 pipeline {
     agent any
+    
     environment {
         SERVICE = 'exchange'
         NAME = "tpenha05/${env.SERVICE}"
+        REGISTRY_CREDENTIALS = 'dockerhub-credentials'
     }
+    
     stages {
-        stage('Dependecies') {
+        stage('Install Dependencies') {
             steps {
-                build job: 'exchange', wait: true
+                script {
+                    sh '''
+                        python3 --version || echo "Python not found"
+                        pip3 --version || echo "Pip not found"
+                        
+                        # Se existir requirements.txt, instalar dependências
+                        if [ -f "requirements.txt" ]; then
+                            pip3 install -r requirements.txt || echo "Failed to install requirements"
+                        fi
+                    '''
+                }
             }
-        }
-        stage('Build') { 
+        }        
+        stage('Build & Push Docker Image') {
             steps {
-                sh 'mvn -B -DskipTests clean package'
-            }
-        }      
-        stage('Build & Push Image') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'USERNAME', passwordVariable: 'TOKEN')]) {
-                    sh "docker login -u $USERNAME -p $TOKEN"
-                    sh "docker buildx create --use --platform=linux/arm64,linux/amd64 --node multi-platform-builder-${env.SERVICE} --name multi-platform-builder-${env.SERVICE}"
-                    sh "docker buildx build --platform=linux/arm64,linux/amd64 --push --tag ${env.NAME}:latest --tag ${env.NAME}:${env.BUILD_ID} -f Dockerfile ."
-                    sh "docker buildx rm --force multi-platform-builder-${env.SERVICE}"
+                script {
+                    withCredentials([usernamePassword(credentialsId: env.REGISTRY_CREDENTIALS, 
+                                                   usernameVariable: 'USERNAME', 
+                                                   passwordVariable: 'TOKEN')]) {
+                        sh """
+                            docker login -u \$USERNAME -p \$TOKEN
+                            docker build -t ${env.NAME}:latest .
+                            docker build -t ${env.NAME}:${env.BUILD_NUMBER} .
+                            docker push ${env.NAME}:latest
+                            docker push ${env.NAME}:${env.BUILD_NUMBER}
+                        """
+                    }
                 }
             }
         }
